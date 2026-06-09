@@ -19,7 +19,7 @@ async def list_employees(
     limit: int = 50,
     department_id: Optional[int] = None,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(RoleChecker(["ADMIN", "MANAGEMENT", "SENIOR_MANAGER", "HR_RECRUITER"]))
+    current_user: User = Depends(RoleChecker(["ADMIN", "MANAGEMENT", "SENIOR_MANAGER", "HR_RECRUITER", "MANAGER"]))
 ):
     """List all employees with pagination. Supports filtering by department."""
     query = select(Employee)
@@ -33,7 +33,7 @@ async def list_employees(
 @router.get("/stats")
 async def get_employee_stats(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(RoleChecker(["ADMIN", "MANAGEMENT", "SENIOR_MANAGER", "HR_RECRUITER"]))
+    current_user: User = Depends(RoleChecker(["ADMIN", "MANAGEMENT", "SENIOR_MANAGER", "HR_RECRUITER", "MANAGER"]))
 ):
     """Aggregate statistics for executive dashboards."""
     total = (await db.execute(select(func.count(Employee.id)))).scalar() or 0
@@ -138,7 +138,7 @@ async def update_employee(
     id: int,
     emp_in: EmployeeUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(RoleChecker(["ADMIN", "MANAGEMENT", "SENIOR_MANAGER", "HR_RECRUITER"]))
+    current_user: User = Depends(RoleChecker(["ADMIN", "MANAGEMENT", "SENIOR_MANAGER", "HR_RECRUITER", "MANAGER"]))
 ):
     """Updates an employee profile's mutable fields."""
     result = await db.execute(select(Employee).filter(Employee.id == id))
@@ -163,7 +163,7 @@ async def run_attrition_prediction(
     environment_satisfaction: float = 4.0,
     training_times_last_year: int = 2,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(RoleChecker(["ADMIN", "MANAGEMENT", "SENIOR_MANAGER"]))
+    current_user: User = Depends(RoleChecker(["ADMIN", "MANAGEMENT", "SENIOR_MANAGER", "MANAGER"]))
 ):
     """Runs the AI Attrition prediction on an employee and saves retention metrics."""
     result = await db.execute(select(Employee).filter(Employee.id == id))
@@ -217,7 +217,7 @@ async def run_attrition_prediction(
 async def get_employee_attrition_prediction(
     id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(RoleChecker(["ADMIN", "MANAGEMENT", "SENIOR_MANAGER"]))
+    current_user: User = Depends(RoleChecker(["ADMIN", "MANAGEMENT", "SENIOR_MANAGER", "MANAGER"]))
 ):
     """Retrieves an employee's attrition risk analysis."""
     result = await db.execute(select(AttritionData).filter(AttritionData.employee_id == id))
@@ -262,5 +262,64 @@ async def run_skill_gap_analysis(
     )
     db.add(assessment)
     await db.commit()
-    await db.refresh(assessment)
     return assessment
+
+# --- AI PERFORMANCE ANALYZER ENDPOINT ---
+@router.post("/{id}/analyze-performance")
+async def run_performance_analysis(
+    id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(RoleChecker(["ADMIN", "MANAGEMENT", "SENIOR_MANAGER", "MANAGER"]))
+):
+    """Generates an AI performance analysis for an employee using Gemini."""
+    # 1. Fetch employee
+    emp_res = await db.execute(select(Employee).filter(Employee.id == id))
+    emp = emp_res.scalars().first()
+    if not emp:
+        raise HTTPException(status_code=404, detail="Employee not found")
+        
+    # 2. Get department details
+    dept_name = "N/A"
+    if emp.department_id:
+        dept_res = await db.execute(select(Department).filter(Department.id == emp.department_id))
+        dept = dept_res.scalars().first()
+        if dept:
+            dept_name = dept.name
+
+    # 3. Get attendance stats for context
+    from app.db.models import Attendance, LeaveRequest
+    att_res = await db.execute(select(Attendance).filter(Attendance.employee_id == id))
+    attendance_records = att_res.scalars().all()
+    total_punches = len(attendance_records)
+    late_punches = len([a for a in attendance_records if a.status == "LATE"])
+    on_time_percentage = 100.0
+    if total_punches > 0:
+        on_time_percentage = round(((total_punches - late_punches) / total_punches) * 100, 1)
+
+    # 4. Get leaves stats for context
+    leaves_res = await db.execute(select(LeaveRequest).filter(LeaveRequest.employee_id == id))
+    leaves_records = leaves_res.scalars().all()
+    total_leaves = len(leaves_records)
+    approved_leaves = len([l for l in leaves_records if l.status == "APPROVED"])
+
+    # 5. Generate AI analysis
+    from app.ai.performance_analyzer import analyze_performance
+    analysis = await analyze_performance(
+        employee_name=f"{emp.first_name} {emp.last_name}",
+        job_title=emp.job_title,
+        department=dept_name,
+        rating=emp.performance_rating,
+        skills=emp.current_skills or [],
+        attendance_stats={
+            "total_days": total_punches,
+            "late_days": late_punches,
+            "on_time_percentage": on_time_percentage
+        },
+        leave_stats={
+            "total_leaves": total_leaves,
+            "approved_leaves": approved_leaves
+        }
+    )
+
+    return analysis
+

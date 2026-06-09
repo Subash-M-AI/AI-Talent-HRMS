@@ -14,24 +14,22 @@ from app.ai.ranking_engine import rank_candidate_against_job
 router = APIRouter(prefix="/candidates", tags=["Candidates"])
 
 def serialize_application(application: Application) -> dict:
-    candidate_data = None
-    if application.candidate:
-        candidate_data = {
-            "id": application.candidate.id,
-            "user_id": application.candidate.user_id,
-            "first_name": application.candidate.first_name,
-            "last_name": application.candidate.last_name,
-            "phone": application.candidate.phone,
-            "skills": application.candidate.skills,
-            "experience": application.candidate.experience,
-            "education": application.candidate.education,
-            "projects": application.candidate.projects,
-            "resume_summary": application.candidate.resume_summary,
-            "resume_score": application.candidate.resume_score,
-            "missing_skills": application.candidate.missing_skills,
-            "strengths": application.candidate.strengths,
-            "created_at": application.candidate.created_at,
-        }
+    candidate = application.candidate
+    # Find active or completed interview if it exists
+    interviews = []
+    if hasattr(application, 'interviews') and application.interviews:
+        for iv in application.interviews:
+            interviews.append({
+                "id": iv.id,
+                "interview_type": iv.interview_type,
+                "status": iv.status,
+                "technical_score": iv.technical_score,
+                "communication_score": iv.communication_score,
+                "confidence_score": iv.confidence_score,
+                "overall_score": iv.overall_score,
+                "summary": iv.summary,
+                "chat_history": iv.chat_history
+            })
     return {
         "id": application.id,
         "candidate_id": application.candidate_id,
@@ -41,7 +39,8 @@ def serialize_application(application: Application) -> dict:
         "ranking_score": application.ranking_score,
         "hiring_recommendation": application.hiring_recommendation,
         "applied_date": application.applied_date,
-        "candidate": candidate_data,
+        "candidate": candidate,
+        "interviews": interviews
     }
 
 @router.post("/upload-resume", response_model=CandidateResponse)
@@ -84,6 +83,7 @@ async def upload_resume(
     cand.resume_score = parsed_data.get("resume_score", 0)
     cand.missing_skills = parsed_data.get("missing_skills", [])
     cand.strengths = parsed_data.get("strengths", [])
+    cand.suitable_role = parsed_data.get("suitable_role", "Software Engineer")
     
     await db.commit()
     await db.refresh(cand)
@@ -158,7 +158,7 @@ async def apply_for_job(
     app_res = await db.execute(
         select(Application)
         .filter(Application.id == application.id)
-        .options(selectinload(Application.candidate))
+        .options(selectinload(Application.candidate), selectinload(Application.interviews))
     )
     return serialize_application(app_res.scalars().first())
 
@@ -176,7 +176,11 @@ async def my_applications(
     res = await db.execute(
         select(Application)
         .filter(Application.candidate_id == cand.id)
-        .options(selectinload(Application.candidate), selectinload(Application.job_post))
+        .options(
+            selectinload(Application.candidate), 
+            selectinload(Application.job_post),
+            selectinload(Application.interviews)
+        )
         .order_by(Application.applied_date.desc())
     )
     return [serialize_application(app) for app in res.scalars().all()]
@@ -185,13 +189,107 @@ async def my_applications(
 async def get_candidate_rankings(
     job_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(RoleChecker(["ADMIN", "MANAGEMENT", "HR_RECRUITER"]))
+    current_user: User = Depends(RoleChecker(["ADMIN", "MANAGEMENT", "HR_RECRUITER", "MANAGER"]))
 ):
     """Retrieves all job applications ranked by semantic similarity (AI Feature 2)."""
     res = await db.execute(
         select(Application)
         .filter(Application.job_post_id == job_id)
-        .options(selectinload(Application.candidate), selectinload(Application.job_post))
+        .options(
+            selectinload(Application.candidate), 
+            selectinload(Application.job_post),
+            selectinload(Application.interviews)
+        )
         .order_by(Application.match_percentage.desc())
     )
     return [serialize_application(app) for app in res.scalars().all()]
+
+@router.post("/applications/{app_id}/approve-screening", response_model=ApplicationResponse)
+async def approve_screening(
+    app_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(RoleChecker(["ADMIN", "MANAGEMENT", "HR_RECRUITER", "MANAGER"]))
+):
+    """Invites a candidate to the AI Voice Screening (status -> INTERVIEWING)."""
+    res = await db.execute(
+        select(Application)
+        .filter(Application.id == app_id)
+        .options(selectinload(Application.candidate))
+    )
+    application = res.scalars().first()
+    if not application:
+        raise HTTPException(status_code=404, detail="Application not found")
+        
+    application.status = "INTERVIEWING"
+    await db.commit()
+    
+    app_res = await db.execute(
+        select(Application)
+        .filter(Application.id == app_id)
+        .options(
+            selectinload(Application.candidate), 
+            selectinload(Application.job_post),
+            selectinload(Application.interviews)
+        )
+    )
+    return serialize_application(app_res.scalars().first())
+
+@router.post("/applications/{app_id}/accept", response_model=ApplicationResponse)
+async def accept_application(
+    app_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(RoleChecker(["ADMIN", "MANAGEMENT", "HR_RECRUITER", "MANAGER"]))
+):
+    """Accepts a candidate after screening (status -> OFFERED)."""
+    res = await db.execute(
+        select(Application)
+        .filter(Application.id == app_id)
+        .options(selectinload(Application.candidate))
+    )
+    application = res.scalars().first()
+    if not application:
+        raise HTTPException(status_code=404, detail="Application not found")
+        
+    application.status = "OFFERED"
+    await db.commit()
+    
+    app_res = await db.execute(
+        select(Application)
+        .filter(Application.id == app_id)
+        .options(
+            selectinload(Application.candidate), 
+            selectinload(Application.job_post),
+            selectinload(Application.interviews)
+        )
+    )
+    return serialize_application(app_res.scalars().first())
+
+@router.post("/applications/{app_id}/reject", response_model=ApplicationResponse)
+async def reject_application(
+    app_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(RoleChecker(["ADMIN", "MANAGEMENT", "HR_RECRUITER", "MANAGER"]))
+):
+    """Rejects a candidate after screening (status -> REJECTED)."""
+    res = await db.execute(
+        select(Application)
+        .filter(Application.id == app_id)
+        .options(selectinload(Application.candidate))
+    )
+    application = res.scalars().first()
+    if not application:
+        raise HTTPException(status_code=404, detail="Application not found")
+        
+    application.status = "REJECTED"
+    await db.commit()
+    
+    app_res = await db.execute(
+        select(Application)
+        .filter(Application.id == app_id)
+        .options(
+            selectinload(Application.candidate), 
+            selectinload(Application.job_post),
+            selectinload(Application.interviews)
+        )
+    )
+    return serialize_application(app_res.scalars().first())

@@ -81,7 +81,8 @@ async def parse_resume(pdf_bytes: bytes) -> dict:
         "resume_summary": "string (brief summary of the candidate's professional profile)",
         "resume_score": integer (score from 0 to 100 assessing the overall document quality, completeness, and achievements),
         "missing_skills": ["list of strings containing key modern tools/skills typical of their stack they seem to miss"],
-        "strengths": ["list of 3-5 key candidate strengths based on their achievements"]
+        "strengths": ["list of 3-5 key candidate strengths based on their achievements"],
+        "suitable_role": "string (suggest a suitable professional role or job title based on their skills and experience, e.g. Full-Stack Developer, Frontend Engineer, etc., fallback to empty string)"
     }}
 
     Resume text to parse:
@@ -189,7 +190,8 @@ def mock_parse_resume_text(text: str) -> dict:
         "resume_summary": "Extracted and mapped resume profile via automated parsing engine.",
         "resume_score": min(score, 100),
         "missing_skills": missing,
-        "strengths": strengths
+        "strengths": strengths,
+        "suitable_role": "Full-Stack Software Engineer"
     }
 
 def get_fallback_structured_data(reason: str) -> dict:
@@ -204,5 +206,6 @@ def get_fallback_structured_data(reason: str) -> dict:
         "resume_summary": f"Could not parse due to: {reason}",
         "resume_score": 30,
         "missing_skills": [],
-        "strengths": ["Eager to showcase experience"]
+        "strengths": ["Eager to showcase experience"],
+        "suitable_role": "Software Engineer"
     }

@@ -9,6 +9,10 @@ logger = logging.getLogger(__name__)
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 DEFAULT_GEMINI_MODELS = [
     "gemini-2.0-flash",
+    "gemini-2.5-flash",
+    "gemini-3.5-flash",
+    "gemini-pro-latest",
+    "gemini-flash-latest",
     "gemini-1.5-flash-latest",
     "gemini-1.5-flash",
     "gemini-pro",
@@ -90,3 +94,47 @@ async def generate_gemini_text(prompt: str, system_instruction: Optional[str] = 
         logger.error("No Gemini models available to try")
     
     return None
+
+
+async def transcribe_audio_gemini(file_bytes: bytes, mime_type: str) -> Optional[str]:
+    if not GEMINI_API_KEY:
+        logger.warning("Gemini not enabled (no API key)")
+        return None
+
+    models = _configured_models()
+    last_error: Optional[Exception] = None
+    
+    for model_name in models:
+        try:
+            logger.info(f"Attempting Gemini transcription with model: {model_name}")
+            model = genai.GenerativeModel(model_name)
+            
+            response = await model.generate_content_async([
+                {
+                    "mime_type": mime_type,
+                    "data": file_bytes
+                },
+                "Please transcribe this audio response. Just output the text transcription of the spoken content. If no speech is detected or it is silent, reply with an empty string."
+            ])
+            
+            text = ""
+            if hasattr(response, 'text'):
+                text = response.text
+            elif hasattr(response, 'candidates') and response.candidates:
+                first_candidate = response.candidates[0]
+                if hasattr(first_candidate, 'content') and hasattr(first_candidate.content, 'parts'):
+                    text = "".join([part.text for part in first_candidate.content.parts if hasattr(part, 'text')])
+            
+            if text is not None:
+                logger.info(f"✓ Gemini transcription {model_name} succeeded: {text.strip()}")
+                return text.strip()
+                
+        except Exception as exc:
+            last_error = exc
+            logger.warning(f"Gemini transcription model {model_name} failed: {type(exc).__name__}: {str(exc)}")
+
+    if last_error:
+        logger.error(f"All Gemini transcription models failed. Last error: {type(last_error).__name__}: {last_error}")
+    
+    return None
+

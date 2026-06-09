@@ -32,11 +32,29 @@ export default function CandidateDashboard() {
   const [interviewStatusText, setInterviewStatusText] = useState('');
   const [evalResult, setEvalResult] = useState<any>(null);
   const [evalLoading, setEvalLoading] = useState(false);
+  const chatEndRef = React.useRef<HTMLDivElement>(null);
+  const [baseTranscript, setBaseTranscript] = useState('');
+  const baseTranscriptRef = React.useRef('');
+  const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
+  const mediaRecorderRef = React.useRef<MediaRecorder | null>(null);
+  const audioChunksRef = React.useRef<Blob[]>([]);
+  const streamRef = React.useRef<MediaStream | null>(null);
+
+  const updateBaseTranscript = (val: string) => {
+    setBaseTranscript(val);
+    baseTranscriptRef.current = val;
+  };
 
   useEffect(() => {
     loadData();
     setupSpeechRecognition();
   }, []);
+
+  useEffect(() => {
+    if (chatEndRef.current) {
+      chatEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [activeInterview?.chat_history]);
 
   const loadData = async () => {
     try {
@@ -49,6 +67,26 @@ export default function CandidateDashboard() {
       setCandidate(candRes);
       setJobs(jobsRes);
       setApplications(appsRes);
+
+      // Restore active (SCHEDULED) interview session on load if candidate is in the middle of it
+      let activeIv = null;
+      if (appsRes && appsRes.length > 0) {
+        for (const app of appsRes) {
+          if (app.interviews && app.interviews.length > 0) {
+            const ongoing = app.interviews.find((iv: any) => iv.status === 'SCHEDULED');
+            if (ongoing) {
+              activeIv = ongoing;
+              break;
+            }
+          }
+        }
+      }
+      if (activeIv) {
+        setActiveInterview(activeIv);
+        const history = activeIv.chat_history || [];
+        const latestAiTurn = [...history].reverse().find((chat: any) => chat.sender === 'ai');
+        setCurrentQuestion(latestAiTurn ? latestAiTurn.message : '');
+      }
     } catch (err) {
       console.error(err);
     } finally {
@@ -66,22 +104,29 @@ export default function CandidateDashboard() {
         recognition.lang = 'en-US';
 
         recognition.onresult = (event: any) => {
-          let interimTranscript = '';
-          let finalTranscript = '';
-
-          for (let i = event.resultIndex; i < event.results.length; ++i) {
-            if (event.results[i].isFinal) {
-              finalTranscript += event.results[i][0].transcript;
-            } else {
-              interimTranscript += event.results[i][0].transcript;
-            }
+          let sessionText = '';
+          for (let i = 0; i < event.results.length; ++i) {
+            sessionText += event.results[i][0].transcript;
           }
-          setTranscript(finalTranscript || interimTranscript);
+          
+          setTranscript(() => {
+            const base = baseTranscriptRef.current;
+            return base 
+              ? base + " " + sessionText.trim() 
+              : sessionText.trim();
+          });
         };
 
         recognition.onerror = (e: any) => {
-          console.error("Speech recognition error: ", e);
+          console.warn("Speech recognition error: ", e);
           setRecording(false);
+          if (e.error === 'not-allowed') {
+            setInterviewStatusText("Microphone access denied. Please enable microphone permissions in your browser or type your answer.");
+          } else if (e.error === 'no-speech') {
+            setInterviewStatusText("No speech detected. Please try again or type your answer.");
+          } else {
+            setInterviewStatusText(`Microphone error: ${e.error || 'unknown'}. Please type your answer.`);
+          }
         };
 
         recognition.onend = () => {
@@ -148,34 +193,94 @@ export default function CandidateDashboard() {
     }
   };
 
-  const toggleRecording = () => {
+  const toggleRecording = async () => {
     if (!speechRecognizer) {
       alert("Speech recognition API is not supported in this browser. Please type your responses.");
       return;
     }
 
     if (recording) {
+      // Stop media recording
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+        mediaRecorderRef.current.stop();
+      }
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
+        streamRef.current = null;
+      }
+      
+      // Stop speech recognizer
       speechRecognizer.stop();
       setRecording(false);
     } else {
-      setTranscript('');
-      speechRecognizer.start();
-      setRecording(true);
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        streamRef.current = stream;
+        
+        audioChunksRef.current = [];
+        let mediaRecorder;
+        try {
+          mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+        } catch (e) {
+          mediaRecorder = new MediaRecorder(stream);
+        }
+        
+        mediaRecorder.ondataavailable = (event: any) => {
+          if (event.data && event.data.size > 0) {
+            audioChunksRef.current.push(event.data);
+          }
+        };
+        
+        mediaRecorder.onstop = () => {
+          const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+          setAudioBlob(blob);
+        };
+        
+        mediaRecorderRef.current = mediaRecorder;
+        
+        // Update transcription base text
+        updateBaseTranscript(transcript.trim());
+        
+        // Start both
+        mediaRecorder.start();
+        speechRecognizer.start();
+        setRecording(true);
+        setAudioBlob(null); // Clear previous recording
+      } catch (err: any) {
+        console.error("Error accessing microphone:", err);
+        alert("Microphone access is required to record audio responses. Please enable microphone permissions or type your response.");
+      }
     }
   };
 
   const handleSendAnswer = async () => {
-    if (!transcript.trim() || !activeInterview) return;
+    if (!activeInterview) return;
 
+    const hasAudio = !!audioBlob;
+    const hasText = !!transcript.trim();
+    if (!hasAudio && !hasText) return;
+
+    // Cleanup recording if running
     setRecording(false);
     if (speechRecognizer) speechRecognizer.stop();
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+    }
 
     try {
-      setInterviewStatusText("Submitting answer and loading next question...");
-      const updatedSession = await api.sendInterviewChat(activeInterview.id, transcript);
+      setInterviewStatusText(hasAudio ? "Uploading audio recording and transcribing..." : "Submitting answer and loading next question...");
+      
+      let updatedSession;
+      if (hasAudio && audioBlob) {
+        updatedSession = await api.sendInterviewChatAudio(activeInterview.id, audioBlob);
+      } else {
+        updatedSession = await api.sendInterviewChat(activeInterview.id, transcript);
+      }
       
       setActiveInterview(updatedSession);
       setTranscript('');
+      setAudioBlob(null); // Clear active audio blob
       
       const history = updatedSession.chat_history;
       const latestRecruiterReply = history[history.length - 1]?.message || '';
@@ -194,8 +299,33 @@ export default function CandidateDashboard() {
     if (!activeInterview) return;
 
     setEvalLoading(true);
+    // Cleanup any active recordings
+    setRecording(false);
+    if (speechRecognizer) speechRecognizer.stop();
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+    }
+
     try {
-      const evaluated = await api.evaluateInterview(activeInterview.id);
+      let currentSession = activeInterview;
+      
+      // If there is an unsent answer (audio or text), send it first!
+      if (audioBlob) {
+        setInterviewStatusText("Uploading final audio recording and transcribing before evaluation...");
+        currentSession = await api.sendInterviewChatAudio(activeInterview.id, audioBlob);
+        setActiveInterview(currentSession);
+        setAudioBlob(null);
+        setTranscript('');
+      } else if (transcript.trim()) {
+        setInterviewStatusText("Submitting final response before evaluation...");
+        currentSession = await api.sendInterviewChat(activeInterview.id, transcript);
+        setActiveInterview(currentSession);
+        setTranscript('');
+      }
+
+      setInterviewStatusText("Compiling screening report and generating feedback...");
+      const evaluated = await api.evaluateInterview(currentSession.id);
       setEvalResult(evaluated);
       setActiveInterview(null);
       await loadData();
@@ -203,6 +333,7 @@ export default function CandidateDashboard() {
       alert(err.message || "Evaluation failed.");
     } finally {
       setEvalLoading(false);
+      setInterviewStatusText('');
     }
   };
 
@@ -251,21 +382,40 @@ export default function CandidateDashboard() {
           )}
 
           {candidate && (
-            <div className="border-t border-border mt-5 pt-4 space-y-2 text-xs font-medium">
+            <div className="border-t border-border mt-5 pt-4 space-y-3 text-xs font-medium">
               <div className="flex justify-between">
-                <span className="text-muted">Extracted Name:</span>
+                <span className="text-muted font-semibold">Extracted Name:</span>
                 <span className="text-text font-bold">{candidate.first_name} {candidate.last_name}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-muted">AI Profile Score:</span>
+                <span className="text-muted font-semibold">AI Profile Score:</span>
                 <span className="text-primary font-bold">{candidate.resume_score}/100</span>
               </div>
+              <div className="flex justify-between">
+                <span className="text-muted font-semibold">Suitable Role:</span>
+                <span className="text-text font-bold">{candidate.suitable_role || "N/A"}</span>
+              </div>
               <div>
-                <span className="text-muted block mb-1">Parsed Core Skills:</span>
+                <span className="text-muted font-semibold block mb-1">Parsed Core Skills:</span>
                 <div className="flex flex-wrap gap-1">
-                  {candidate.skills.slice(0, 5).map((skill: string, idx: number) => (
-                    <span key={idx} className="bg-slate-100 px-2 py-0.5 rounded text-[10px]">{skill}</span>
+                  {candidate.skills.map((skill: string, idx: number) => (
+                    <span key={idx} className="bg-slate-100 px-2 py-0.5 rounded text-[10px] text-text font-semibold">{skill}</span>
                   ))}
+                </div>
+              </div>
+              <div>
+                <span className="text-muted font-semibold block mb-1 mt-2">Projects:</span>
+                <div className="space-y-2 max-h-36 overflow-y-auto pr-1">
+                  {candidate.projects && candidate.projects.length > 0 ? (
+                    candidate.projects.map((proj: any, idx: number) => (
+                      <div key={idx} className="bg-slate-50 p-2 rounded border border-slate-100">
+                        <p className="font-bold text-text text-[11px]">{proj.name || proj.title}</p>
+                        <p className="text-muted text-[10px] mt-0.5">{proj.description}</p>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="text-muted text-[10px] italic">No projects found.</p>
+                  )}
                 </div>
               </div>
             </div>
@@ -278,92 +428,222 @@ export default function CandidateDashboard() {
             <Brain className="w-5 h-5 text-primary" /> AI Voice Screening Agent
           </div>
           
-          {/* Default Screen */}
+          {/* Default Screen & Application Status-based Screen */}
           {!activeInterview && !evalResult && !evalLoading && (
-            <div className="flex-1 flex flex-col items-center justify-center text-center space-y-3 py-8 text-muted">
-              <Mic className="w-12 h-12 text-slate-200" />
-              <h5 className="font-bold text-text text-sm">Voice Recruiter Inactive</h5>
-              <p className="text-xs max-w-sm">When your application status changes to 'Interviewing', click 'Start Screening' to begin your automated verbal evaluation.</p>
-            </div>
+            (() => {
+              const interviewingApp = applications.find(app => app.status === 'INTERVIEWING');
+              const screenedApp = applications.find(app => app.status === 'SCREENED');
+              const offeredApp = applications.find(app => app.status === 'OFFERED');
+              const rejectedApp = applications.find(app => app.status === 'REJECTED');
+
+              if (offeredApp) {
+                return (
+                  <div className="flex-1 flex flex-col items-center justify-center text-center space-y-4 py-8 px-4 bg-green-50/30 rounded-2xl border border-green-100">
+                    <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center text-green-600 animate-bounce">
+                      <CheckCircle className="w-10 h-10" />
+                    </div>
+                    <div className="space-y-1">
+                      <h4 className="font-extrabold text-green-700 text-lg">Congratulations! 🎉</h4>
+                      <p className="text-sm font-bold text-green-600">Application Approved & Selected</p>
+                    </div>
+                    <p className="text-xs text-muted max-w-md">
+                      We are thrilled to offer you a position at our company! Our recruitment team has reviewed your AI Voice Screening performance and approved your profile. Please check your inbox for the official offer letter and next steps.
+                    </p>
+                  </div>
+                );
+              }
+
+              if (rejectedApp) {
+                return (
+                  <div className="flex-1 flex flex-col items-center justify-center text-center space-y-4 py-8 px-4 bg-slate-50/50 rounded-2xl border border-slate-100">
+                    <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center text-slate-400">
+                      <ShieldAlert className="w-10 h-10" />
+                    </div>
+                    <div className="space-y-1">
+                      <h4 className="font-extrabold text-slate-700 text-base">Application Closed</h4>
+                      <p className="text-xs font-semibold text-slate-500">Screening Process Complete</p>
+                    </div>
+                    <p className="text-xs text-muted max-w-md">
+                      Thank you for your interest and for completing the AI Voice Screening round. While we were impressed by your background, we have decided to move forward with other candidates who more closely fit our current project needs. We wish you the best in your career search!
+                    </p>
+                  </div>
+                );
+              }
+
+              if (interviewingApp) {
+                return (
+                  <div className="flex-1 flex flex-col items-center justify-center text-center space-y-4 py-8 px-4 bg-primary/5 rounded-2xl border border-primary/10">
+                    <div className="w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center text-primary animate-pulse">
+                      <Mic className="w-10 h-10" />
+                    </div>
+                    <div className="space-y-1">
+                      <h4 className="font-extrabold text-text text-base">AI Voice Screening Invitation</h4>
+                      <p className="text-xs text-muted">You have been invited to participate in a voice recruiter interview screening.</p>
+                    </div>
+                    <button
+                      onClick={() => handleStartInterview(interviewingApp.id)}
+                      className="bg-primary hover:bg-primary-hover text-white px-6 py-3 rounded-xl font-bold text-xs shadow-soft cursor-pointer transition-all flex items-center gap-2"
+                    >
+                      <Mic className="w-4 h-4" /> Start AI Voice Screening
+                    </button>
+                    <span className="text-[10px] text-muted font-bold">Requires microphone access | ~10 mins</span>
+                  </div>
+                );
+              }
+
+              if (screenedApp) {
+                return (
+                  <div className="flex-1 flex flex-col items-center justify-center text-center space-y-4 py-8 px-4 bg-slate-50/50 rounded-2xl border border-slate-100">
+                    <div className="w-16 h-16 bg-yellow-50 rounded-full flex items-center justify-center text-yellow-600">
+                      <Sparkles className="w-10 h-10 animate-spin-slow" />
+                    </div>
+                    <div className="space-y-1">
+                      <h4 className="font-extrabold text-text text-base">Screening Under Review</h4>
+                      <p className="text-xs text-muted">AI evaluation completed successfully.</p>
+                    </div>
+                    <p className="text-xs text-muted max-w-sm">
+                      Your voice screening responses have been analyzed and graded. The HR Recruiting team is currently reviewing the composite report and feedback. You will see their decision here soon!
+                    </p>
+                  </div>
+                );
+              }
+
+              return (
+                <div className="flex-1 flex flex-col items-center justify-center text-center space-y-3 py-8 text-muted">
+                  <Mic className="w-12 h-12 text-slate-200" />
+                  <h5 className="font-bold text-text text-sm">Voice Recruiter Inactive</h5>
+                  <p className="text-xs max-w-sm">When your application status changes to 'Interviewing', click 'Start Screening' to begin your automated verbal evaluation.</p>
+                </div>
+              );
+            })()
           )}
 
           {/* Active Voice Interview Screen */}
           {activeInterview && (
-            <div className="flex-1 flex flex-col justify-between space-y-6 pt-2">
-              <div className="space-y-4">
-                <div className="p-4 rounded-2xl glass-panel-green border border-green-200">
-                  <p className="text-sm font-bold text-text whitespace-pre-line leading-relaxed">{currentQuestion}</p>
-                </div>
-                
-                {/* Speech recognition text output */}
-                <div className="p-4 bg-slate-50 border border-slate-100 rounded-xl min-h-[80px]">
-                  <p className="text-xs font-semibold uppercase tracking-wider text-muted mb-1 flex items-center gap-1">
-                    Your Transcribed Answer {recording && <span className="w-2.5 h-2.5 bg-red-500 rounded-full animate-ping" />}
-                  </p>
-                  <p className="text-sm text-text/80 font-medium">
-                    {transcript || "Speak clearly into your microphone or type your answer..."}
-                  </p>
-                </div>
-              </div>
+            (() => {
+              const firstTurn = activeInterview?.chat_history?.[0];
+              const questions = firstTurn?.question_list || [];
+              const currentIdx = firstTurn?.current_question_index || 0;
+              const isFinished = currentIdx >= questions.length;
 
-              {/* Status indicators */}
-              {interviewStatusText && (
-                <p className="text-[10px] text-primary font-bold animate-pulse">{interviewStatusText}</p>
-              )}
-
-              {/* Speech control panels */}
-              <div className="flex items-center justify-between gap-4 border-t border-border pt-4">
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={toggleRecording}
-                    className={`p-3.5 rounded-full shadow-soft cursor-pointer transition-all flex items-center justify-center ${
-                      recording ? 'bg-red-500 text-white animate-pulse' : 'bg-primary text-white hover:bg-primary-hover'
-                    }`}
-                    title={recording ? "Stop Recording" : "Record Answer"}
-                  >
-                    <Mic className="w-5 h-5" />
-                  </button>
-                  <button
-                    onClick={() => speakText(currentQuestion)}
-                    className="p-3.5 bg-slate-100 hover:bg-slate-200 text-text rounded-full cursor-pointer transition-all flex items-center justify-center"
-                    title="Re-read Question Out Loud"
-                  >
-                    <Volume2 className="w-5 h-5" />
-                  </button>
-                  
-                  {/* Visual Waveform bar toggled on record */}
-                  {recording && (
-                    <div className="flex items-end h-6 ml-2">
-                      <span className="wave-bar" />
-                      <span className="wave-bar" />
-                      <span className="wave-bar" />
-                      <span className="wave-bar" />
-                      <span className="wave-bar" />
+              return (
+                <div className="flex-1 flex flex-col justify-between space-y-4 pt-2">
+                  <div className="space-y-4 flex flex-col flex-1">
+                    {/* Chat Dialogue History */}
+                    <div className="flex-1 overflow-y-auto space-y-4 max-h-[280px] min-h-[180px] p-4 bg-slate-50 border border-slate-100 rounded-2xl pr-2">
+                      {activeInterview.chat_history.map((chat: any, idx: number) => {
+                        const isAI = chat.sender === 'ai';
+                        return (
+                          <div key={idx} className={`flex gap-3 ${isAI ? 'justify-start' : 'justify-end'}`}>
+                            {isAI && (
+                              <div className="w-8 h-8 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold text-xs shrink-0">
+                                AI
+                              </div>
+                            )}
+                            <div className={`p-3.5 rounded-2xl max-w-[80%] text-sm font-medium shadow-sm ${
+                              isAI 
+                                ? 'bg-white border border-border text-text' 
+                                : 'bg-primary text-white'
+                            }`}>
+                              <p className="whitespace-pre-line leading-relaxed">{chat.message}</p>
+                            </div>
+                            {!isAI && (
+                              <div className="w-8 h-8 rounded-full bg-slate-200 text-slate-700 flex items-center justify-center font-bold text-xs shrink-0">
+                                U
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                      <div ref={chatEndRef} />
                     </div>
-                  )}
-                </div>
+                    
+                    {/* Answer Input Area (Speech or Typing) */}
+                    {!isFinished ? (
+                      <div className="space-y-2">
+                        <div className="flex justify-between items-center">
+                          <label className="text-xs font-bold uppercase tracking-wider text-muted flex items-center gap-1">
+                            Your Answer {recording && <span className="w-2.5 h-2.5 bg-red-500 rounded-full animate-ping" />}
+                          </label>
+                          <span className="text-[10px] text-muted font-bold">You can type or use the microphone</span>
+                        </div>
+                        
+                        <div className="flex gap-2 items-end">
+                          <textarea
+                            value={transcript}
+                            onChange={(e) => {
+                              setTranscript(e.target.value);
+                              if (audioBlob) setAudioBlob(null);
+                            }}
+                            placeholder="Speak clearly or type your response here..."
+                            className="flex-1 p-3.5 bg-slate-50 border border-slate-200 rounded-2xl min-h-[60px] max-h-[120px] text-sm text-text font-medium focus:outline-none focus:ring-1 focus:ring-primary focus:bg-white transition-all resize-y"
+                            disabled={evalLoading}
+                          />
+                          
+                          <div className="flex gap-1.5 shrink-0">
+                            <button
+                              onClick={toggleRecording}
+                              className={`p-3 rounded-2xl shadow-soft cursor-pointer transition-all flex items-center justify-center ${
+                                recording ? 'bg-red-500 text-white animate-pulse' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                              }`}
+                              title={recording ? "Stop Recording" : "Record Answer"}
+                            >
+                              <Mic className="w-5 h-5" />
+                            </button>
+                            
+                            <button
+                              onClick={() => speakText(currentQuestion)}
+                              className="p-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-2xl cursor-pointer transition-all flex items-center justify-center"
+                              title="Read Question Out Loud"
+                            >
+                              <Volume2 className="w-5 h-5" />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="p-4 bg-green-50 border border-green-200 rounded-2xl text-center text-xs font-bold text-green-700">
+                        🎉 All questions completed! Click the "Finish Interview & Submit Report" button below to compile and send your screening evaluation.
+                      </div>
+                    )}
+                  </div>
 
-                <div className="flex gap-2">
-                  {/* If questions left, Send. If last question index done, Evaluate */}
-                  {currentQuestion.includes("Submit Interview") ? (
+                  {/* Status indicators */}
+                  <div className="flex flex-col gap-1.5">
+                    {audioBlob && (
+                      <div className="flex items-center gap-1.5 text-[10px] text-green-600 font-bold bg-green-50 border border-green-100 px-3 py-1.5 rounded-xl self-start">
+                        <CheckCircle className="w-3.5 h-3.5" /> Audio response captured (Ready to send or submit)
+                      </div>
+                    )}
+                    {interviewStatusText && (
+                      <p className="text-[10px] text-primary font-bold animate-pulse">{interviewStatusText}</p>
+                    )}
+                  </div>
+
+                  {/* Action Buttons */}
+                  <div className="flex justify-between items-center border-t border-border pt-4 mt-2">
                     <button
                       onClick={handleEvaluateInterview}
-                      className="bg-primary hover:bg-primary-hover text-white px-5 py-2.5 rounded-xl font-bold text-xs shadow-soft cursor-pointer transition-all"
+                      disabled={evalLoading}
+                      className="bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white px-5 py-2.5 rounded-xl font-bold text-xs shadow-soft cursor-pointer transition-all flex items-center gap-1.5"
                     >
-                      Submit & Evaluate Answers
+                      <CheckCircle className="w-4 h-4" />
+                      Finish & Submit Interview
                     </button>
-                  ) : (
-                    <button
-                      onClick={handleSendAnswer}
-                      disabled={!transcript.trim()}
-                      className="bg-primary hover:bg-primary-hover disabled:bg-slate-100 disabled:text-slate-400 text-white px-5 py-2.5 rounded-xl font-bold text-xs shadow-soft cursor-pointer transition-all"
-                    >
-                      Send Answer
-                    </button>
-                  )}
+
+                    {!isFinished && (
+                      <button
+                        onClick={handleSendAnswer}
+                        disabled={(!transcript.trim() && !audioBlob) || evalLoading}
+                        className="bg-primary hover:bg-primary-hover disabled:bg-slate-100 disabled:text-slate-400 text-white px-5 py-2.5 rounded-xl font-bold text-xs shadow-soft cursor-pointer transition-all"
+                      >
+                        Send Answer
+                      </button>
+                    )}
+                  </div>
                 </div>
-              </div>
-            </div>
+              );
+            })()
           )}
 
           {/* Evaluation Report Screen */}

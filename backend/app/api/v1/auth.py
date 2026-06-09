@@ -10,13 +10,14 @@ from app.core.security import get_password_hash, verify_password, create_access_
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
-ALLOWED_ROLES = {"ADMIN", "MANAGEMENT", "SENIOR_MANAGER", "HR_RECRUITER", "EMPLOYEE", "CANDIDATE"}
-EMPLOYEE_PROFILE_ROLES = {"MANAGEMENT", "SENIOR_MANAGER", "HR_RECRUITER", "EMPLOYEE"}
+ALLOWED_ROLES = {"ADMIN", "MANAGEMENT", "SENIOR_MANAGER", "HR_RECRUITER", "EMPLOYEE", "CANDIDATE", "MANAGER"}
+EMPLOYEE_PROFILE_ROLES = {"MANAGEMENT", "SENIOR_MANAGER", "HR_RECRUITER", "EMPLOYEE", "MANAGER"}
 DEFAULT_JOB_TITLES = {
     "MANAGEMENT": "Management Executive",
     "SENIOR_MANAGER": "Senior Manager",
     "HR_RECRUITER": "HR Recruiter",
     "EMPLOYEE": "Employee",
+    "MANAGER": "Manager",
 }
 
 def _derive_profile_name(email: str, first_name: str | None, last_name: str | None) -> tuple[str, str]:
@@ -94,7 +95,7 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: AsyncSessi
     employee_id = 0
     candidate_id = 0
     
-    if user.role == "EMPLOYEE" or user.role in ["ADMIN", "MANAGEMENT", "SENIOR_MANAGER", "HR_RECRUITER"]:
+    if user.role == "EMPLOYEE" or user.role in ["ADMIN", "MANAGEMENT", "SENIOR_MANAGER", "HR_RECRUITER", "MANAGER"]:
         emp_result = await db.execute(select(Employee).filter(Employee.user_id == user.id))
         emp = emp_result.scalars().first()
         if emp:

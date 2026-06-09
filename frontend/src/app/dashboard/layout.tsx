@@ -52,15 +52,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           { name: "HR Analytics Copilot", icon: <Brain className="w-5 h-5" />, path: "/dashboard/copilot" },
           { name: "Post Job Openings", icon: <Briefcase className="w-5 h-5" />, path: "/dashboard/recruiter" }
         ];
+      case 'MANAGER':
       case 'MANAGEMENT':
-        return [
-          { name: "Workforce Analytics", icon: <LayoutDashboard className="w-5 h-5" />, path: "/dashboard/management" },
-          { name: "HR Analytics Copilot", icon: <Brain className="w-5 h-5" />, path: "/dashboard/copilot" }
-        ];
       case 'SENIOR_MANAGER':
         return [
-          { name: "Team Overview", icon: <LayoutDashboard className="w-5 h-5" />, path: "/dashboard/manager" },
-          { name: "Leaves Approval", icon: <CheckSquare className="w-5 h-5" />, path: "/dashboard/manager#leaves" }
+          { name: "Workforce Analytics", icon: <LayoutDashboard className="w-5 h-5" />, path: "/dashboard/management" },
+          { name: "Leaves Approval", icon: <CheckSquare className="w-5 h-5" />, path: "/dashboard/management#leaves" },
+          { name: "HR Analytics Copilot", icon: <Brain className="w-5 h-5" />, path: "/dashboard/copilot" }
         ];
       case 'HR_RECRUITER':
         return [

@@ -2,13 +2,18 @@ import os
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import declarative_base
 
-# Use SQLite for local development so we don't need Docker/PostgreSQL
-DATABASE_URL = "sqlite+aiosqlite:///./hrms.db"
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql+asyncpg://hr_user:hr_password@localhost:5432/hr_db")
+
+# Replace postgresql:// with postgresql+asyncpg:// if needed
+if DATABASE_URL.startswith("postgresql://"):
+    DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
 
 engine = create_async_engine(
     DATABASE_URL,
     echo=False,
-    connect_args={"check_same_thread": False}  # Required for SQLite
+    pool_pre_ping=True,
+    pool_size=20,
+    max_overflow=10
 )
 
 AsyncSessionLocal = async_sessionmaker(

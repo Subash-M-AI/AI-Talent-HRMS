@@ -1,5 +1,6 @@
 from typing import List
-from fastapi import APIRouter, Depends, HTTPException, status
+import logging
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
@@ -10,6 +11,9 @@ from app.schemas.schemas import InterviewResponse, InterviewCreate, InterviewUpd
 from app.core.security import get_current_user, RoleChecker
 from app.ai.conversational_recruiter import chat_respond, generate_screening_questions
 from app.ai.voice_interview import evaluate_voice_interview
+from app.ai.gemini_client import transcribe_audio_gemini
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/interviews", tags=["Interviews"])
 
@@ -139,6 +143,91 @@ async def respond_to_recruiter(
             context=context
         )
         # Combine transition feedback with next question
+        ai_reply = f"{transition}\n\n**Next Question:** {next_question}"
+
+    # Save recruiter reply
+    history.append({"sender": "ai", "message": ai_reply})
+    
+    # Update state indices
+    first_turn["current_question_index"] = curr_idx
+    interview.chat_history = history
+    
+    # flag session as dirty to force sqlalchemy update detection
+    from sqlalchemy.orm.attributes import flag_modified
+    flag_modified(interview, "chat_history")
+    
+    await db.commit()
+    await db.refresh(interview)
+    return interview
+
+@router.post("/{id}/chat-audio", response_model=InterviewResponse)
+async def respond_to_recruiter_audio(
+    id: int,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Transcribes an uploaded audio file using Gemini, saves the transcribed candidate response, and returns the next question."""
+    # Read the audio file
+    file_bytes = await file.read()
+    mime_type = file.content_type or "audio/webm"
+    
+    # Transcribe audio using Gemini
+    logger.info(f"Transcribing audio response for interview {id} (size: {len(file_bytes)} bytes, mime: {mime_type})")
+    transcript_text = await transcribe_audio_gemini(file_bytes, mime_type)
+    
+    if not transcript_text or not transcript_text.strip():
+        # Fallback transcript if empty/failed
+        transcript_text = "[Spoken Audio Response]"
+        
+    # Find interview
+    res = await db.execute(
+        select(Interview)
+        .filter(Interview.id == id)
+        .options(selectinload(Interview.application).selectinload(Application.candidate))
+    )
+    interview = res.scalars().first()
+    if not interview:
+        raise HTTPException(status_code=404, detail="Interview not found")
+        
+    if interview.status == "COMPLETED":
+        raise HTTPException(status_code=400, detail="This interview session has already been submitted and completed.")
+
+    # Access current question configuration
+    history = list(interview.chat_history)
+    first_turn = history[0] if history else {}
+    questions = first_turn.get("question_list", ["Tell me about yourself."])
+    curr_idx = first_turn.get("current_question_index", 0)
+
+    # Save candidate's answer
+    history.append({"sender": "candidate", "message": transcript_text})
+    curr_idx += 1
+
+    ai_reply = ""
+    is_last = curr_idx >= len(questions)
+
+    if is_last:
+        ai_reply = (
+            "Thank you for sharing your responses! I have gathered all your answers. "
+            "Click the 'Submit Interview' button to complete this round and generate your evaluation."
+        )
+    else:
+        # Load next question
+        next_question = questions[curr_idx]
+        job_res = await db.execute(select(JobPost).filter(JobPost.id == interview.application.job_post_id))
+        job = job_res.scalars().first()
+        context = {
+            "name": interview.application.candidate.first_name,
+            "role": "Candidate",
+            "job_title": job.title if job else "Developer",
+            "app_status": "Interviewing"
+        }
+        
+        transition = await chat_respond(
+            chat_history=history[:-1], 
+            user_message=f"[Transition response to answer: '{transcript_text}' and transition to next question: '{next_question}']",
+            context=context
+        )
         ai_reply = f"{transition}\n\n**Next Question:** {next_question}"
 
     # Save recruiter reply

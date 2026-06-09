@@ -152,6 +152,7 @@ class CandidateResponse(BaseModel):
     resume_score: int
     missing_skills: List[str]
     strengths: List[str]
+    suitable_role: Optional[str] = None
     created_at: datetime
 
     class Config:
@@ -167,6 +168,7 @@ class ApplicationResponse(BaseModel):
     hiring_recommendation: Optional[str]
     applied_date: datetime
     candidate: Optional[CandidateResponse] = None
+    interviews: Optional[List[Dict[str, Any]]] = []
 
     class Config:
         from_attributes = True

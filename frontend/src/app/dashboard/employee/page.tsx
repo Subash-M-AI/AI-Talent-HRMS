@@ -11,6 +11,7 @@ interface Attendance {
   clock_in: string;
   clock_out: string | null;
   status: string;
+  location?: string;
 }
 
 interface LeaveRequest {
@@ -66,6 +67,19 @@ export default function EmployeeDashboard() {
 
   useEffect(() => {
     loadData();
+    // Restore saved target role and skill assessment roadmap on load
+    const savedRole = sessionStorage.getItem('employee_target_role');
+    if (savedRole) {
+      setTargetRole(savedRole);
+    }
+    const savedAssessment = sessionStorage.getItem('employee_skill_assessment');
+    if (savedAssessment) {
+      try {
+        setAssessment(JSON.parse(savedAssessment));
+      } catch (e) {
+        console.warn("Failed to parse saved skill assessment", e);
+      }
+    }
   }, []);
 
   const loadData = async () => {
@@ -148,6 +162,8 @@ export default function EmployeeDashboard() {
     try {
       const res = await api.analyzeSkillGap(profile.id, targetRole);
       setAssessment(res);
+      sessionStorage.setItem('employee_target_role', targetRole);
+      sessionStorage.setItem('employee_skill_assessment', JSON.stringify(res));
     } catch (err: any) {
       alert(err.message || "AI Gap analysis failed.");
     } finally {
@@ -327,6 +343,46 @@ export default function EmployeeDashboard() {
               {leaveLoading ? "Filing request..." : "Apply for Leaves"}
             </button>
           </form>
+        </div>
+
+        {/* My Leave Requests Panel */}
+        <div className="bg-white p-6 rounded-2xl border border-border shadow-card space-y-4">
+          <div className="flex justify-between items-center">
+            <h4 className="font-extrabold text-text text-base">My Leave Requests</h4>
+            <span className="text-[10px] font-bold text-muted bg-slate-100 px-2 py-0.5 rounded-full">
+              {leaves.length} Filed
+            </span>
+          </div>
+
+          {leaves.length === 0 ? (
+            <p className="text-xs text-muted font-medium py-4 text-center border border-dashed border-border rounded-xl">
+              No leave requests filed yet.
+            </p>
+          ) : (
+            <div className="space-y-3 max-h-[220px] overflow-y-auto pr-1">
+              {leaves.map((leave) => (
+                <div key={leave.id} className="p-3 rounded-xl border border-border bg-slate-50/50 space-y-1.5 text-xs font-semibold">
+                  <div className="flex justify-between items-center">
+                    <span className="font-bold text-text uppercase tracking-wide text-[10px]">
+                      {leave.leave_type} Leave
+                    </span>
+                    <span className={`inline-block px-2.5 py-0.5 rounded text-[10px] font-bold ${
+                      leave.status === 'APPROVED' ? 'bg-green-100 text-green-800' :
+                      leave.status === 'REJECTED' ? 'bg-red-100 text-red-800' : 'bg-amber-100 text-amber-800'
+                    }`}>
+                      {leave.status === 'REJECTED' ? 'DECLINED' : leave.status}
+                    </span>
+                  </div>
+                  <p className="text-muted text-[10px] font-normal italic">
+                    "{leave.reason || 'No reason provided.'}"
+                  </p>
+                  <p className="text-[10px] text-muted">
+                    {leave.start_date} to {leave.end_date}
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 

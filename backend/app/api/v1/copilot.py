@@ -87,7 +87,7 @@ async def compile_company_context(db: AsyncSession) -> dict:
 async def query_hr_copilot(
     payload: CopilotRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(RoleChecker(["ADMIN", "MANAGEMENT", "SENIOR_MANAGER", "HR_RECRUITER", "EMPLOYEE", "CANDIDATE"]))
+    current_user: User = Depends(RoleChecker(["ADMIN", "MANAGEMENT", "SENIOR_MANAGER", "HR_RECRUITER", "EMPLOYEE", "CANDIDATE", "MANAGER"]))
 ):
     """Executes a chat session with the Analytics Copilot using live organizational metrics."""
     if current_user.role in {"EMPLOYEE", "CANDIDATE"}:

@@ -33,8 +33,8 @@ async def seed_data():
         logger.info("Seeding users...")
         users = [
             User(email="admin@hrms.com", hashed_password=get_password_hash("admin123"), role="ADMIN"),
-            User(email="ceo@hrms.com", hashed_password=get_password_hash("ceo123"), role="MANAGEMENT"),
-            User(email="manager@hrms.com", hashed_password=get_password_hash("manager123"), role="SENIOR_MANAGER"),
+            User(email="ceo@hrms.com", hashed_password=get_password_hash("ceo123"), role="MANAGER"),
+            User(email="manager@hrms.com", hashed_password=get_password_hash("manager123"), role="MANAGER"),
             User(email="recruiter@hrms.com", hashed_password=get_password_hash("recruiter123"), role="HR_RECRUITER"),
             User(email="employee@hrms.com", hashed_password=get_password_hash("employee123"), role="EMPLOYEE"),
             User(email="candidate@hrms.com", hashed_password=get_password_hash("candidate123"), role="CANDIDATE"),

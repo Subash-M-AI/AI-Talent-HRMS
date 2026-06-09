@@ -4,6 +4,9 @@ import React, { useEffect, useState } from 'react';
 import { api } from '../../../lib/api';
 import { Briefcase, FileText, CheckCircle, Plus, Users, Star, Award, ChevronRight } from 'lucide-react';
 
+import { useRouter } from 'next/navigation';
+import { useAuthStore } from '../../../store/authStore';
+
 interface JobPost {
   id: number;
   title: string;
@@ -13,6 +16,7 @@ interface JobPost {
 
 interface Application {
   id: number;
+  status: string;
   match_percentage: number;
   ranking_score: number;
   hiring_recommendation: string;
@@ -22,14 +26,51 @@ interface Application {
     skills: string[];
     resume_score: number;
   };
+  interviews?: any[];
 }
 
 export default function RecruiterDashboard() {
+  const router = useRouter();
+  const { role } = useAuthStore();
   const [jobs, setJobs] = useState<JobPost[]>([]);
   const [selectedJobId, setSelectedJobId] = useState<number | null>(null);
   const [rankings, setRankings] = useState<Application[]>([]);
   const [loading, setLoading] = useState(true);
   const [rankingLoading, setRankingLoading] = useState(false);
+
+  useEffect(() => {
+    if (role && role !== 'HR_RECRUITER' && role !== 'ADMIN' && role !== 'MANAGER') {
+      router.push('/dashboard/candidate');
+    }
+  }, [role]);
+
+  // Recruiter actions
+  const handleApproveScreening = async (appId: number) => {
+    try {
+      await api.approveScreening(appId);
+      if (selectedJobId) await loadRankings(selectedJobId);
+    } catch (err: any) {
+      alert(err.message || "Failed to invite candidate to voice screening.");
+    }
+  };
+
+  const handleAcceptApplication = async (appId: number) => {
+    try {
+      await api.acceptApplication(appId);
+      if (selectedJobId) await loadRankings(selectedJobId);
+    } catch (err: any) {
+      alert(err.message || "Failed to accept candidate.");
+    }
+  };
+
+  const handleRejectApplication = async (appId: number) => {
+    try {
+      await api.rejectApplication(appId);
+      if (selectedJobId) await loadRankings(selectedJobId);
+    } catch (err: any) {
+      alert(err.message || "Failed to reject candidate.");
+    }
+  };
   
   // Create Job Form
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -55,7 +96,15 @@ export default function RecruiterDashboard() {
       const jobsRes = await api.getJobs();
       setJobs(jobsRes);
       if (jobsRes.length > 0) {
-        setSelectedJobId(jobsRes[0].id);
+        const saved = sessionStorage.getItem('recruiter_selected_job_id');
+        const parsedId = saved ? Number(saved) : null;
+        const exists = jobsRes.some((j: any) => j.id === parsedId);
+        if (exists && parsedId !== null) {
+          setSelectedJobId(parsedId);
+        } else {
+          setSelectedJobId(jobsRes[0].id);
+          sessionStorage.setItem('recruiter_selected_job_id', String(jobsRes[0].id));
+        }
       }
     } catch (err) {
       console.error(err);
@@ -137,7 +186,10 @@ export default function RecruiterDashboard() {
               {jobs.map((job) => (
                 <button
                   key={job.id}
-                  onClick={() => setSelectedJobId(job.id)}
+                  onClick={() => {
+                    setSelectedJobId(job.id);
+                    sessionStorage.setItem('recruiter_selected_job_id', String(job.id));
+                  }}
                   className={`w-full text-left p-4 rounded-xl border transition-all text-xs font-semibold flex items-center justify-between cursor-pointer ${
                     selectedJobId === job.id
                       ? 'border-primary bg-green-50/20 text-text ring-1 ring-primary'
@@ -184,8 +236,19 @@ export default function RecruiterDashboard() {
                   {/* Top Header info */}
                   <div className="flex justify-between items-start gap-4">
                     <div>
-                      <h4 className="text-base font-extrabold text-text">{app.candidate.first_name} {app.candidate.last_name}</h4>
-                      <p className="text-xs text-muted mt-0.5">Skills: {app.candidate.skills.join(', ')}</p>
+                      <div className="flex items-center gap-2">
+                        <h4 className="text-base font-extrabold text-text">{app.candidate.first_name} {app.candidate.last_name}</h4>
+                        <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider ${
+                          app.status === 'OFFERED' ? 'bg-green-100 text-green-700' :
+                          app.status === 'REJECTED' ? 'bg-red-100 text-red-700' :
+                          app.status === 'SCREENED' ? 'bg-yellow-100 text-yellow-700' :
+                          app.status === 'INTERVIEWING' ? 'bg-blue-100 text-blue-700' :
+                          'bg-slate-100 text-slate-700'
+                        }`}>
+                          {app.status}
+                        </span>
+                      </div>
+                      <p className="text-xs text-muted mt-1">Skills: {app.candidate.skills.join(', ')}</p>
                     </div>
                     {/* Score badges */}
                     <div className="flex gap-2">
@@ -207,6 +270,97 @@ export default function RecruiterDashboard() {
                       <h5 className="text-xs font-bold text-text">AI Recommendation</h5>
                       <p className="text-xs text-text/80 leading-relaxed mt-0.5">{app.hiring_recommendation}</p>
                     </div>
+                  </div>
+
+                  {/* Dynamic Action & Screening Results Section */}
+                  <div className="border-t border-border pt-4 mt-2">
+                    {app.status === 'APPLIED' && (
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => handleApproveScreening(app.id)}
+                          className="bg-primary hover:bg-primary-hover text-white px-4 py-2 rounded-xl text-xs font-bold transition-all shadow-sm cursor-pointer"
+                        >
+                          Invite to Voice Screening
+                        </button>
+                      </div>
+                    )}
+
+                    {app.status === 'INTERVIEWING' && (
+                      <div className="text-xs font-semibold text-blue-600 bg-blue-50 border border-blue-100 p-3 rounded-xl">
+                        Candidate has been invited. Currently completing the AI Voice Screening round.
+                      </div>
+                    )}
+
+                    {app.status === 'SCREENED' && (
+                      (() => {
+                        const completedInterview = app.interviews?.find(iv => iv.status === 'COMPLETED');
+                        if (completedInterview) {
+                          return (
+                            <div className="space-y-3">
+                              <div className="p-4 rounded-xl border border-yellow-200 bg-yellow-50/20 space-y-3">
+                                <div className="flex justify-between items-center">
+                                  <span className="text-xs font-bold text-text uppercase tracking-wider">AI Voice Recruiter Report</span>
+                                  <span className="text-[10px] font-bold text-yellow-700 bg-yellow-100 px-2 py-0.5 rounded">Completed</span>
+                                </div>
+                                <div className="grid grid-cols-4 gap-2 text-center text-xs font-bold">
+                                  <div className="p-2 border border-border bg-white rounded-lg">
+                                    <span className="block text-[9px] text-muted uppercase leading-none mb-1">Tech</span>
+                                    {completedInterview.technical_score}%
+                                  </div>
+                                  <div className="p-2 border border-border bg-white rounded-lg">
+                                    <span className="block text-[9px] text-muted uppercase leading-none mb-1">Comm</span>
+                                    {completedInterview.communication_score}%
+                                  </div>
+                                  <div className="p-2 border border-border bg-white rounded-lg">
+                                    <span className="block text-[9px] text-muted uppercase leading-none mb-1">Conf</span>
+                                    {completedInterview.confidence_score}%
+                                  </div>
+                                  <div className="p-2 bg-primary/10 border border-primary/20 rounded-lg text-primary">
+                                    <span className="block text-[9px] text-primary/80 uppercase leading-none mb-1">Overall</span>
+                                    {completedInterview.overall_score}%
+                                  </div>
+                                </div>
+                                <div className="text-[11px] text-text/80 leading-relaxed font-medium bg-white p-3 rounded-lg border border-slate-100">
+                                  <p className="font-bold text-text mb-1">Synthesis Feedback Summary:</p>
+                                  <p className="whitespace-pre-line">{completedInterview.summary}</p>
+                                </div>
+                              </div>
+                              <div className="flex gap-2">
+                                <button
+                                  onClick={() => handleAcceptApplication(app.id)}
+                                  className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl text-xs font-bold transition-all shadow-sm cursor-pointer"
+                                >
+                                  Accept Candidate
+                                </button>
+                                <button
+                                  onClick={() => handleRejectApplication(app.id)}
+                                  className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-xl text-xs font-bold transition-all shadow-sm cursor-pointer"
+                                >
+                                  Reject Candidate
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        }
+                        return (
+                          <div className="text-xs font-semibold text-amber-600 bg-amber-50 border border-amber-100 p-3 rounded-xl">
+                            Voice screening completed, awaiting evaluation synthesis.
+                          </div>
+                        );
+                      })()
+                    )}
+
+                    {app.status === 'OFFERED' && (
+                      <div className="text-xs font-semibold text-green-600 bg-green-50 border border-green-100 p-3 rounded-xl">
+                        Candidate application accepted. Offer letter sent.
+                      </div>
+                    )}
+
+                    {app.status === 'REJECTED' && (
+                      <div className="text-xs font-semibold text-red-600 bg-red-50 border border-red-100 p-3 rounded-xl">
+                        Candidate application rejected. Rejection notification sent.
+                      </div>
+                    )}
                   </div>
                 </div>
               ))}

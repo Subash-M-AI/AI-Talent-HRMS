@@ -101,7 +101,7 @@ async def get_my_attendance(
 @router.get("/team", response_model=List[AttendanceResponse])
 async def get_team_attendance(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(RoleChecker(["ADMIN", "MANAGEMENT", "SENIOR_MANAGER"]))
+    current_user: User = Depends(RoleChecker(["ADMIN", "MANAGEMENT", "SENIOR_MANAGER", "MANAGER"]))
 ):
     """Gets all team attendance entries recorded today."""
     today = date.today()

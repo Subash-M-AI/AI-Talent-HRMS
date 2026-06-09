@@ -20,7 +20,7 @@ async def list_jobs(db: AsyncSession = Depends(get_db)):
 async def create_job_post(
     job_in: JobPostCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(RoleChecker(["ADMIN", "MANAGEMENT", "HR_RECRUITER"]))
+    current_user: User = Depends(RoleChecker(["ADMIN", "MANAGEMENT", "HR_RECRUITER", "MANAGER"]))
 ):
     """Creates a new job opening."""
     job = JobPost(

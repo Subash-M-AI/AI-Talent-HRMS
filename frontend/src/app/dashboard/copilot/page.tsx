@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef, Suspense } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { api } from '../../../lib/api';
 import { Brain, Send, Sparkles } from 'lucide-react';
 
@@ -9,7 +10,8 @@ interface ChatTurn {
   message: string;
 }
 
-export default function CopilotDashboard() {
+function CopilotDashboardContent() {
+  const searchParams = useSearchParams();
   const [query, setQuery] = useState('');
   const [chatLog, setChatLog] = useState<ChatTurn[]>([
     {
@@ -18,26 +20,34 @@ export default function CopilotDashboard() {
     }
   ]);
   const [loading, setLoading] = useState(false);
+  const initialQueryTriggered = useRef(false);
 
   const handleSubmit = async (e?: React.FormEvent, customQuery?: string) => {
     if (e) e.preventDefault();
     const activeQuery = customQuery || query;
     if (!activeQuery.trim() || loading) return;
 
-    const nextLog = [...chatLog, { sender: 'user', message: activeQuery } as ChatTurn];
-    setChatLog(nextLog);
+    setChatLog(prev => [...prev, { sender: 'user', message: activeQuery }]);
     setQuery('');
     setLoading(true);
 
     try {
       const result = await api.askCopilot(activeQuery);
-      setChatLog([...nextLog, { sender: 'copilot', message: result.response }]);
+      setChatLog(prev => [...prev, { sender: 'copilot', message: result.response }]);
     } catch (err: any) {
-      setChatLog([...nextLog, { sender: 'copilot', message: `### Error\n\nFailed to get response: **${err.message || 'Server timeout'}**. Please try again.` }]);
+      setChatLog(prev => [...prev, { sender: 'copilot', message: `### Error\n\nFailed to get response: **${err.message || 'Server timeout'}**. Please try again.` }]);
     } finally {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    const queryParam = searchParams.get('query');
+    if (queryParam && !initialQueryTriggered.current) {
+      initialQueryTriggered.current = true;
+      handleSubmit(undefined, queryParam);
+    }
+  }, [searchParams]);
 
   return (
     <div className="h-[calc(100vh-8rem)] flex flex-col justify-between space-y-6">
@@ -133,5 +143,17 @@ export default function CopilotDashboard() {
         </form>
       </div>
     </div>
+  );
+}
+
+export default function CopilotDashboard() {
+  return (
+    <Suspense fallback={
+      <div className="h-full flex items-center justify-center min-h-[300px]">
+        <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin" />
+      </div>
+    }>
+      <CopilotDashboardContent />
+    </Suspense>
   );
 }

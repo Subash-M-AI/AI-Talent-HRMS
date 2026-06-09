@@ -55,7 +55,7 @@ async def get_my_leaves(
 @router.get("/pending", response_model=List[LeaveRequestResponse])
 async def get_pending_leaves(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(RoleChecker(["ADMIN", "MANAGEMENT", "SENIOR_MANAGER"]))
+    current_user: User = Depends(RoleChecker(["ADMIN", "MANAGEMENT", "SENIOR_MANAGER", "MANAGER"]))
 ):
     """Lists all pending leave requests for manager approval."""
     res = await db.execute(
@@ -68,7 +68,7 @@ async def update_leave_status(
     id: int,
     leave_update: LeaveRequestUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(RoleChecker(["ADMIN", "MANAGEMENT", "SENIOR_MANAGER"]))
+    current_user: User = Depends(RoleChecker(["ADMIN", "MANAGEMENT", "SENIOR_MANAGER", "MANAGER"]))
 ):
     """Approves or Rejects a pending leave request."""
     # Find manager employee id

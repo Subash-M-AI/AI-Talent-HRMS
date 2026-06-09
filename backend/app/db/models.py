@@ -119,6 +119,7 @@ class Candidate(Base):
     resume_score = Column(Integer, default=0)  # Score out of 100
     missing_skills = Column(JSON, default=list)  # List of strings
     strengths = Column(JSON, default=list)  # List of strings
+    suitable_role = Column(String(255), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     # Relationships

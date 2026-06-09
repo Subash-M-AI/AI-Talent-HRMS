@@ -38,7 +38,8 @@ export default function LoginPage() {
     const normalizedRole = userRole.toLowerCase().replace('_', '');
     if (normalizedRole === 'admin') router.push('/dashboard/admin');
     else if (normalizedRole === 'management') router.push('/dashboard/management');
-    else if (normalizedRole === 'seniormanager') router.push('/dashboard/manager');
+    else if (normalizedRole === 'manager') router.push('/dashboard/management');
+    else if (normalizedRole === 'seniormanager') router.push('/dashboard/management');
     else if (normalizedRole === 'hrrecruiter') router.push('/dashboard/recruiter');
     else if (normalizedRole === 'employee') router.push('/dashboard/employee');
     else if (normalizedRole === 'candidate') router.push('/dashboard/candidate');
@@ -85,9 +86,15 @@ export default function LoginPage() {
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-accent text-primary text-sm font-semibold border border-green-200">
             <Sparkles className="w-4 h-4" /> Enterprise AI HRMS
           </div>
-          {/* Upside graph image */}
-          <div className="w-full max-w-sm h-72 rounded-2xl overflow-hidden flex items-center justify-center bg-transparent">
-            <img src="/upside-graph.svg" alt="Upside growth graph" className="w-full h-full object-contain" />
+          {/* Styled Avatar Profile Card */}
+          <div className="w-full max-w-sm bg-white/75 backdrop-blur-md border border-emerald-100 rounded-3xl p-8 shadow-card flex flex-col items-center text-center space-y-4">
+            <div className="w-28 h-28 rounded-full overflow-hidden border-4 border-white shadow-soft bg-slate-100">
+              <img src="/avatar.png" alt="Talent Profile Avatar" className="w-full h-full object-cover" />
+            </div>
+            <div className="space-y-1">
+              <h3 className="text-base font-extrabold text-text">Workspace Identity Portal</h3>
+              <p className="text-xs text-muted max-w-xs leading-relaxed">Secure role-routed gateway for AI talent screening, time-off requests, and analytics.</p>
+            </div>
           </div>
 
           <div className="grid grid-cols-2 gap-4 pt-6">

@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { api } from '../../lib/api';
 import { ArrowLeft, ArrowRight, Brain, Briefcase, CheckCircle, LockKeyhole, Mail, Shield, UserRound, Users } from 'lucide-react';
 
-type SignupRole = 'ADMIN' | 'MANAGEMENT' | 'SENIOR_MANAGER' | 'HR_RECRUITER' | 'EMPLOYEE' | 'CANDIDATE';
+type SignupRole = 'ADMIN' | 'MANAGER' | 'HR_RECRUITER' | 'EMPLOYEE' | 'CANDIDATE';
 
 interface RoleOption {
   value: SignupRole;
@@ -39,18 +39,11 @@ const ROLE_OPTIONS: RoleOption[] = [
     icon: <Users className="w-5 h-5" />
   },
   {
-    value: 'SENIOR_MANAGER',
-    label: 'Senior Manager',
-    description: 'Team overview and leave approval workspace.',
-    defaultTitle: 'Senior Manager',
+    value: 'MANAGER',
+    label: 'Manager',
+    description: 'Team overview, leave approvals, and workforce analytics.',
+    defaultTitle: 'Manager',
     icon: <Shield className="w-5 h-5" />
-  },
-  {
-    value: 'MANAGEMENT',
-    label: 'Management',
-    description: 'Executive workforce analytics workspace.',
-    defaultTitle: 'Management Executive',
-    icon: <Brain className="w-5 h-5" />
   },
   {
     value: 'ADMIN',
@@ -61,7 +54,7 @@ const ROLE_OPTIONS: RoleOption[] = [
   }
 ];
 
-const PROFILE_ROLES = new Set<SignupRole>(['MANAGEMENT', 'SENIOR_MANAGER', 'HR_RECRUITER', 'EMPLOYEE']);
+const PROFILE_ROLES = new Set<SignupRole>(['MANAGER', 'HR_RECRUITER', 'EMPLOYEE']);
 
 export default function SignupPage() {
   const router = useRouter();

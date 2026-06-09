@@ -230,6 +230,4 @@ We provide one-click buttons on the login screen, or you can use:
 - **Senior Manager**: `manager@hrms.com` / `manager123`
 - **HR Recruiter**: `recruiter@hrms.com` / `recruiter123`
 - **Employee**: `employee@hrms.com` / `employee123`
-- **Candidate**: `candidate@hrms.com` / `candidate123`.  
-
-AI Talent Intelligence HRMS is a next-generation AI-powered platform designed to revolutionize recruitment and workforce management through intelligent automation and predictive analytics. It delivers a scalable, enterprise-ready solution for the future of Human Resources.
+- **Candidate**: `candidate@hrms.com` / `candidate123`

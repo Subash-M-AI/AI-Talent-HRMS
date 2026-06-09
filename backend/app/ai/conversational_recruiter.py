@@ -6,23 +6,25 @@ from app.ai.gemini_client import generate_gemini_text, is_gemini_enabled
 logger = logging.getLogger(__name__)
 
 async def generate_screening_questions(candidate_skills: list, job_title: str) -> list:
-    """Generates 3-5 technical questions tailored to candidate's skills and the role."""
+    """Generates 5-10 technical questions tailored to candidate's skills and the role."""
     if not is_gemini_enabled():
         return [
             f"Can you explain your experience working with {candidate_skills[0] if candidate_skills else 'software development'}?",
             f"What is the most complex project you built using {candidate_skills[-1] if candidate_skills else 'APIs'} and how did you design it?",
-            "How do you handle scaling and concurrency challenges in an production application?",
-            "Can you describe your experience collaborating with cross-functional teams in an agile environment?"
+            "How do you handle scaling and concurrency challenges in a production application?",
+            "Can you describe your experience collaborating with cross-functional teams in an agile environment?",
+            "What strategies do you use to ensure software quality, unit testing, and robust error handling?",
+            "How do you approach designing secure APIs and protecting candidate credentials?"
         ]
 
     prompt = f"""
     You are an AI Technical Recruiter screening a candidate for the role: "{job_title}".
     The candidate has the following skills: {', '.join(candidate_skills)}.
     
-    Generate exactly 4 relevant, challenging screening questions that combine their skills with the role requirements.
+    Generate exactly 6 relevant, challenging screening questions that combine their skills with the role requirements.
     Return ONLY a JSON list of strings, with no markdown formatting, no ```json wrapper, just the raw JSON list.
     Example output format:
-    ["Question 1?", "Question 2?", "Question 3?", "Question 4?"]
+    ["Question 1?", "Question 2?", "Question 3?", "Question 4?", "Question 5?", "Question 6?"]
     """
     try:
         text_resp = await generate_gemini_text(prompt)
@@ -40,7 +42,9 @@ async def generate_screening_questions(candidate_skills: list, job_title: str) -
             f"Describe your background working with {candidate_skills[0] if candidate_skills else 'software development'}.",
             "Walk me through a challenging technical problem you solved recently.",
             "How do you design APIs that are highly scalable and maintainable?",
-            "What strategies do you use to ensure code quality and testing?"
+            "What strategies do you use to ensure code quality and testing?",
+            "Describe your experience with modern CI/CD pipelines and deployment containerization.",
+            "How do you handle security vulnerabilities and authentication inside web services?"
         ]
 
 async def chat_respond(chat_history: list, user_message: str, context: dict) -> str:
